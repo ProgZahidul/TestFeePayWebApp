@@ -1,0 +1,247 @@
+{
+  "studentId": 1,
+  "discount": 5,
+  "amountPaid": 500,
+  "paymentDate": "2024-02-14T10:42:22.787Z",
+
+  "feeStructure": [
+    {
+      "feeStructureId": 1
+    },
+    {
+      "feeStructureId": 2
+
+    }
+  ]
+}
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using TestFeePayWebApp.Models;
+
+namespace TestFeePayWebApp.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class FeePaymentsController : ControllerBase
+    {
+        private readonly AppDbContext _context;
+
+        public FeePaymentsController(AppDbContext context)
+        {
+            _context = context;
+        }
+
+        // GET: api/FeePayments
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<FeePayment>>> GetfeePayments()
+        {
+            return await _context.feePayments.ToListAsync();
+        }
+
+        // GET: api/FeePayments/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<FeePayment>> GetFeePayment(int id)
+        {
+            var feePayment = await _context.feePayments.FindAsync(id);
+
+            if (feePayment == null)
+            {
+                return NotFound();
+            }
+
+            return feePayment;
+        }
+
+        // PUT: api/FeePayments/5
+        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutFeePayment(int id, FeePayment feePayment)
+        {
+            if (id != feePayment.FeePaymentId)
+            {
+                return BadRequest();
+            }
+
+            _context.Entry(feePayment).State = EntityState.Modified;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!FeePaymentExists(id))
+                {
+                    return NotFound();
+                }
+                else
+                {
+                    throw;
+                }
+            }
+
+            return NoContent();
+        }
+
+        // POST: api/FeePayments
+        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+        //[HttpPost]
+        //public async Task<IActionResult> CreateFeePayment([FromBody] FeePayment feePayment)
+        //{
+        //    if (!ModelState.IsValid)
+        //    {
+        //        return BadRequest(ModelState);
+        //    }
+
+        //    try
+        //    {
+        //        // Attach FeeStructure entities based on FeeStructureId
+        //        if (feePayment.FeeStructure != null && feePayment.FeeStructure.Any())
+        //        {
+        //            feePayment.FeeStructure = await _context.feeStructures
+        //                .Where(fs => feePayment.FeeStructure.Select(f => f.FeeStructureId).Contains(fs.FeeStructureId))
+        //                .ToListAsync();
+        //        }
+
+
+
+        //        var studentId = feePayment.StudentId;
+        //        var previousDue = await _context.dueBalances
+        //            .Where(b => b.StudentId == studentId)
+        //            .Select(b => b.DueBalanceAmount)
+        //            .FirstOrDefaultAsync();
+
+        //        feePayment.TotalFeeAmount = feePayment.FeeStructure?.Sum(fs => fs.FeeAmount) ?? 0;
+
+        //        feePayment.AmountAfterDiscount = feePayment.TotalFeeAmount - (feePayment.TotalFeeAmount * feePayment.Discount / 100);
+
+        //        feePayment.PreviousDue = previousDue ?? 0;
+
+        //        feePayment.TotalAmount = feePayment.AmountAfterDiscount + feePayment.PreviousDue;
+
+
+        //        feePayment.AmountRemaining = feePayment.TotalAmount - feePayment.AmountPaid;
+
+
+
+
+        //        _context.feePayments.Add(feePayment);
+        //        await _context.SaveChangesAsync();
+
+        //        return Ok(feePayment); // Return the created FeePayment entity if needed
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, $"Internal Server Error: {ex.Message}");
+        //    }
+        //}
+
+
+        [HttpPost]
+        public async Task<IActionResult> CreateFeePayment([FromBody] FeePayment feePayment)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            using (var transaction = _context.Database.BeginTransaction())
+            {
+                try
+                {
+                    // Attach FeeStructure entities based on FeeStructureId
+                    if (feePayment.FeeStructure != null && feePayment.FeeStructure.Any())
+                    {
+                        feePayment.FeeStructure = await _context.feeStructures
+                            .Where(fs => feePayment.FeeStructure.Select(f => f.FeeStructureId).Contains(fs.FeeStructureId))
+                            .ToListAsync();
+                    }
+
+                    var studentId = feePayment.StudentId;
+                    var previousDue = await _context.dueBalances
+                        .Where(b => b.StudentId == studentId)
+                        .Select(b => b.DueBalanceAmount)
+                        .FirstOrDefaultAsync();
+
+                    feePayment.TotalFeeAmount = feePayment.FeeStructure?.Sum(fs => fs.FeeAmount) ?? 0;
+
+                    feePayment.AmountAfterDiscount = feePayment.TotalFeeAmount - (feePayment.TotalFeeAmount * feePayment.Discount / 100);
+
+                    feePayment.PreviousDue = previousDue ?? 0;
+
+                    feePayment.TotalAmount = feePayment.AmountAfterDiscount + feePayment.PreviousDue;
+
+
+                    feePayment.AmountRemaining = feePayment.TotalAmount - feePayment.AmountPaid;
+
+
+                    // Update DueBalanceAmount in DueBalance table
+                    var dueBalance = await _context.dueBalances
+                        .Where(db => db.StudentId == feePayment.StudentId)
+                        .FirstOrDefaultAsync();
+
+                    if (dueBalance != null)
+                    {
+                        dueBalance.DueBalanceAmount = feePayment.AmountRemaining;
+                        dueBalance.LustUpdate = DateTime.Now; // Update LastUpdate timestamp
+                    }
+                    else
+                    {
+                        _context.dueBalances.Add(new DueBalance
+                        {
+                            StudentId = feePayment.StudentId,
+                            DueBalanceAmount = feePayment.AmountRemaining,
+                            LustUpdate = DateTime.Now // Set LastUpdate timestamp for a new record
+                        });
+                    }
+
+                     // Add FeePayment entity to the context
+ 		    _context.feePayments.Add(feePayment);
+
+                    // Save changes to the database
+                    await _context.SaveChangesAsync();
+
+                    // Commit the transaction
+                    transaction.Commit();
+
+                    return Ok(feePayment); // Return the created FeePayment entity if needed
+                }
+                catch (Exception ex)
+                {
+                    // Rollback the transaction in case of an error
+                    transaction.Rollback();
+                    return StatusCode(500, $"Internal Server Error: {ex.Message}");
+                }
+            }
+        }
+
+
+        // DELETE: api/FeePayments/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteFeePayment(int id)
+        {
+            var feePayment = await _context.feePayments.FindAsync(id);
+            if (feePayment == null)
+            {
+                return NotFound();
+            }
+
+            _context.feePayments.Remove(feePayment);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        private bool FeePaymentExists(int id)
+        {
+            return _context.feePayments.Any(e => e.FeePaymentId == id);
+        }
+    }
+}
